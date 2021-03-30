@@ -243,6 +243,23 @@ class Youtube
         return $this->youtube->videos->delete($id);
     }
 
+	/**
+	 * Return the Video duration
+	 * @param  int  $video_id
+	 *
+	 * @return int
+	 */
+	public function getVideoDetails($videoId) {
+		$listResponse = $this->youtube->videos->listVideos("contentDetails", array('id' => $videoId));
+
+		// If $listResponse is empty, the specified video was not found.
+		if (!isset($listResponse[0])) {
+			return sprintf('<h3>Can\'t find a video with video id: %s</h3>', $videoId);
+		} else {
+			return $listResponse[0];
+		}
+	}
+
     /**
      * @param $data
      * @param $privacyStatus
