@@ -9,239 +9,239 @@ use Illuminate\Support\Facades\DB;
 
 class Youtube
 {
-    /**
-     * Application Container
-     *
-     * @var Application
-     */
-    private $app;
+	/**
+	 * Application Container
+	 *
+	 * @var Application
+	 */
+	private $app;
 
-    /**
-     * Google Client
-     *
-     * @var \Google_Client
-     */
-    protected $client;
+	/**
+	 * Google Client
+	 *
+	 * @var \Google_Client
+	 */
+	protected $client;
 
-    /**
-     * Google YouTube Service
-     *
-     * @var \Google_Service_YouTube
-     */
-    protected $youtube;
+	/**
+	 * Google YouTube Service
+	 *
+	 * @var \Google_Service_YouTube
+	 */
+	protected $youtube;
 
-    /**
-     * Video ID
-     *
-     * @var string
-     */
-    private $videoId;
+	/**
+	 * Video ID
+	 *
+	 * @var string
+	 */
+	private $videoId;
 
-    /**
-     * Video Snippet
-     *
-     * @var array
-     */
-    private $snippet;
+	/**
+	 * Video Snippet
+	 *
+	 * @var array
+	 */
+	private $snippet;
 
-    /**
-     * Thumbnail URL
-     *
-     * @var string
-     */
-    private $thumbnailUrl;
+	/**
+	 * Thumbnail URL
+	 *
+	 * @var string
+	 */
+	private $thumbnailUrl;
 
-    /**
-     * Constructor
-     *
-     * @param \Google_Client $client
-     */
-    public function __construct($app, Google_Client $client)
-    {
-        $this->app = $app;
+	/**
+	 * Constructor
+	 *
+	 * @param \Google_Client $client
+	 */
+	public function __construct($app, Google_Client $client)
+	{
+		$this->app = $app;
 
-        $this->client = $this->setup($client);
+		$this->client = $this->setup($client);
 
-        $this->youtube = new \Google_Service_YouTube($this->client);
+		$this->youtube = new \Google_Service_YouTube($this->client);
 
-        if ($accessToken = $this->getLatestAccessTokenFromDB()) {
-            $this->client->setAccessToken($accessToken);
-        }
-    }
+		if ($accessToken = $this->getLatestAccessTokenFromDB()) {
+			$this->client->setAccessToken($accessToken);
+		}
+	}
 
-    /**
-     * Upload the video to YouTube
-     *
-     * @param  string $path
-     * @param  array $data
-     * @param  string $privacyStatus
-     * @return self
-     * @throws Exception
-     */
-    public function upload($path, array $data = [], $privacyStatus = 'public')
-    {
-        if(!file_exists($path)) {
-            throw new Exception('Video file does not exist at path: "'. $path .'". Provide a full path to the file before attempting to upload.');
-        }
+	/**
+	 * Upload the video to YouTube
+	 *
+	 * @param  string $path
+	 * @param  array $data
+	 * @param  string $privacyStatus
+	 * @return self
+	 * @throws Exception
+	 */
+	public function upload($path, array $data = [], $privacyStatus = 'public')
+	{
+		if(!file_exists($path)) {
+			throw new Exception('Video file does not exist at path: "'. $path .'". Provide a full path to the file before attempting to upload.');
+		}
 
-        $this->handleAccessToken();
+		$this->handleAccessToken();
 
-        try {
-            $video = $this->getVideo($data, $privacyStatus);
+		try {
+			$video = $this->getVideo($data, $privacyStatus);
 
-            // Set the Chunk Size
-            $chunkSize = 1 * 1024 * 1024;
+			// Set the Chunk Size
+			$chunkSize = 1 * 1024 * 1024;
 
-            // Set the defer to true
-            $this->client->setDefer(true);
+			// Set the defer to true
+			$this->client->setDefer(true);
 
-            // Build the request
-            $insert = $this->youtube->videos->insert('status,snippet', $video);
+			// Build the request
+			$insert = $this->youtube->videos->insert('status,snippet,recordingDetails', $video);
 
-            // Upload
-            $media = new \Google_Http_MediaFileUpload(
-                $this->client,
-                $insert,
-                'video/*',
-                null,
-                true,
-                $chunkSize
-            );
+			// Upload
+			$media = new \Google_Http_MediaFileUpload(
+				$this->client,
+				$insert,
+				'video/*',
+				null,
+				true,
+				$chunkSize
+			);
 
-            // Set the Filesize
-            $media->setFileSize(filesize($path));
+			// Set the Filesize
+			$media->setFileSize(filesize($path));
 
-            // Read the file and upload in chunks
-            $status = false;
-            $handle = fopen($path, "rb");
+			// Read the file and upload in chunks
+			$status = false;
+			$handle = fopen($path, "rb");
 
-            while (!$status && !feof($handle)) {
-                $chunk = fread($handle, $chunkSize);
-                $status = $media->nextChunk($chunk);
-            }
+			while (!$status && !feof($handle)) {
+				$chunk = fread($handle, $chunkSize);
+				$status = $media->nextChunk($chunk);
+			}
 
-            fclose($handle);
+			fclose($handle);
 
-            $this->client->setDefer(false);
+			$this->client->setDefer(false);
 
-            // Set ID of the Uploaded Video
-            $this->videoId = $status['id'];
+			// Set ID of the Uploaded Video
+			$this->videoId = $status['id'];
 
-            // Set the Snippet from Uploaded Video
-            $this->snippet = $status['snippet'];
+			// Set the Snippet from Uploaded Video
+			$this->snippet = $status['snippet'];
 
-        }  catch (\Google_Service_Exception $e) {
-            throw new Exception($e->getMessage());
-        } catch (\Google_Exception $e) {
-            throw new Exception($e->getMessage());
-        }
+		}  catch (\Google_Service_Exception $e) {
+			throw new Exception($e->getMessage());
+		} catch (\Google_Exception $e) {
+			throw new Exception($e->getMessage());
+		}
 
-        return $this;
-    }
+		return $this;
+	}
 
-    /**
-     * Update the video on YouTube
-     *
-     * @param  string $id
-     * @param  array $data
-     * @param  string $privacyStatus
-     * @return self
-     * @throws Exception
-     */
-    public function update($id, array $data = [], $privacyStatus = 'public')
-    {
-        $this->handleAccessToken();
+	/**
+	 * Update the video on YouTube
+	 *
+	 * @param  string $id
+	 * @param  array $data
+	 * @param  string $privacyStatus
+	 * @return self
+	 * @throws Exception
+	 */
+	public function update($id, array $data = [], $privacyStatus = 'public')
+	{
+		$this->handleAccessToken();
 
-        if (!$this->exists($id)) {
-            throw new Exception('A video matching id "'. $id .'" could not be found.');
-        }
+		if (!$this->exists($id)) {
+			throw new Exception('A video matching id "'. $id .'" could not be found.');
+		}
 
-        try {
-            $video = $this->getVideo($data, $privacyStatus, $id);
+		try {
+			$video = $this->getVideo($data, $privacyStatus, $id);
 
-            $status = $this->youtube->videos->update('status,snippet', $video);
+			$status = $this->youtube->videos->update('status,snippet,recordingDetails', $video);
 
-            // Set ID of the Updated Video
-            $this->videoId = $status['id'];
+			// Set ID of the Updated Video
+			$this->videoId = $status['id'];
 
-            // Set the Snippet from Updated Video
-            $this->snippet = $status['snippet'];
-        }  catch (\Google_Service_Exception $e) {
-            throw new Exception($e->getMessage());
-        } catch (\Google_Exception $e) {
-            throw new Exception($e->getMessage());
-        }
+			// Set the Snippet from Updated Video
+			$this->snippet = $status['snippet'];
+		}  catch (\Google_Service_Exception $e) {
+			throw new Exception($e->getMessage());
+		} catch (\Google_Exception $e) {
+			throw new Exception($e->getMessage());
+		}
 
-        return $this;
-    }
+		return $this;
+	}
 
-    /**
-     * Set a Custom Thumbnail for the Upload
-     *
-     * @param  string $imagePath
-     * @return self
-     * @throws Exception
-     */
-    public function withThumbnail($imagePath)
-    {
-        try {
-            $videoId = $this->getVideoId();
+	/**
+	 * Set a Custom Thumbnail for the Upload
+	 *
+	 * @param  string $imagePath
+	 * @return self
+	 * @throws Exception
+	 */
+	public function withThumbnail($imagePath)
+	{
+		try {
+			$videoId = $this->getVideoId();
 
-            $chunkSizeBytes = 1 * 1024 * 1024;
+			$chunkSizeBytes = 1 * 1024 * 1024;
 
-            $this->client->setDefer(true);
+			$this->client->setDefer(true);
 
-            $setRequest = $this->youtube->thumbnails->set($videoId);
+			$setRequest = $this->youtube->thumbnails->set($videoId);
 
-            $media = new \Google_Http_MediaFileUpload(
-                $this->client,
-                $setRequest,
-                'image/png',
-                null,
-                true,
-                $chunkSizeBytes
-            );
-            $media->setFileSize(filesize($imagePath));
+			$media = new \Google_Http_MediaFileUpload(
+				$this->client,
+				$setRequest,
+				'image/png',
+				null,
+				true,
+				$chunkSizeBytes
+			);
+			$media->setFileSize(filesize($imagePath));
 
-            $status = false;
-            $handle = fopen($imagePath, "rb");
+			$status = false;
+			$handle = fopen($imagePath, "rb");
 
-            while (!$status && !feof($handle)) {
-                $chunk  = fread($handle, $chunkSizeBytes);
-                $status = $media->nextChunk($chunk);
-            }
+			while (!$status && !feof($handle)) {
+				$chunk  = fread($handle, $chunkSizeBytes);
+				$status = $media->nextChunk($chunk);
+			}
 
-            fclose($handle);
+			fclose($handle);
 
-            $this->client->setDefer(false);
-            $this->thumbnailUrl = $status['items'][0]['default']['url'];
+			$this->client->setDefer(false);
+			$this->thumbnailUrl = $status['items'][0]['default']['url'];
 
-        } catch (\Google_Service_Exception $e) {
-            throw new Exception($e->getMessage());
-        } catch (\Google_Exception $e) {
-            throw new Exception($e->getMessage());
-        }
+		} catch (\Google_Service_Exception $e) {
+			throw new Exception($e->getMessage());
+		} catch (\Google_Exception $e) {
+			throw new Exception($e->getMessage());
+		}
 
-        return $this;
-    }
+		return $this;
+	}
 
-    /**
-     * Delete a YouTube video by it's ID.
-     *
-     * @param  int $id
-     * @return bool
-     * @throws Exception
-     */
-    public function delete($id)
-    {
-        $this->handleAccessToken();
+	/**
+	 * Delete a YouTube video by it's ID.
+	 *
+	 * @param  int $id
+	 * @return bool
+	 * @throws Exception
+	 */
+	public function delete($id)
+	{
+		$this->handleAccessToken();
 
-        if (!$this->exists($id)) {
-            throw new Exception('A video matching id "'. $id .'" could not be found.');
-        }
+		if (!$this->exists($id)) {
+			throw new Exception('A video matching id "'. $id .'" could not be found.');
+		}
 
-        return $this->youtube->videos->delete($id);
-    }
+		return $this->youtube->videos->delete($id);
+	}
 
 	/**
 	 * Return the Video duration
@@ -250,7 +250,7 @@ class Youtube
 	 * @return int
 	 */
 	public function getVideoDetails($videoId) {
-		$listResponse = $this->youtube->videos->listVideos("contentDetails", array('id' => $videoId));
+		$listResponse = $this->youtube->videos->listVideos("contentDetails,status,snippet,statistics", array('id' => $videoId));
 
 		// If $listResponse is empty, the specified video was not found.
 		if (!isset($listResponse[0])) {
@@ -260,179 +260,184 @@ class Youtube
 		}
 	}
 
-    /**
-     * @param $data
-     * @param $privacyStatus
-     * @param null $id
-     * @return \Google_Service_YouTube_Video
-     */
-    private function getVideo($data, $privacyStatus, $id = null)
-    {
-        // Setup the Snippet
-        $snippet = new \Google_Service_YouTube_VideoSnippet();
+	/**
+	 * @param $data
+	 * @param $privacyStatus
+	 * @param null $id
+	 * @return \Google_Service_YouTube_Video
+	 */
+	private function getVideo($data, $privacyStatus, $id = null)
+	{
+		// Setup the Snippet
+		$snippet = new \Google_Service_YouTube_VideoSnippet();
 
-        if (array_key_exists('title', $data))       $snippet->setTitle($data['title']);
-        if (array_key_exists('description', $data)) $snippet->setDescription($data['description']);
-        if (array_key_exists('tags', $data))        $snippet->setTags($data['tags']);
-        if (array_key_exists('category_id', $data)) $snippet->setCategoryId($data['category_id']);
+		if (array_key_exists('title', $data))       $snippet->setTitle($data['title']);
+		if (array_key_exists('description', $data)) $snippet->setDescription($data['description']);
+		if (array_key_exists('tags', $data))        $snippet->setTags($data['tags']);
+		if (array_key_exists('category_id', $data)) $snippet->setCategoryId($data['category_id']);
 
-        // Set the Privacy Status
-        $status = new \Google_Service_YouTube_VideoStatus();
-        $status->privacyStatus = $privacyStatus;
+		// Set the Privacy Status
+		$status = new \Google_Service_YouTube_VideoStatus();
+		$status->privacyStatus = $privacyStatus;
+		$status->selfDeclaredMadeForKids = false;
 
-        // Set the Snippet & Status
-        $video = new \Google_Service_YouTube_Video();
-        if ($id)
-        {
-            $video->setId($id);
-        }
+		$recordingDetails = new \Google_Service_YouTube_VideoRecordingDetails();
+		if (array_key_exists('recording_date', $data)) $recordingDetails->setRecordingDate($data['recording_date']);
 
-        $video->setSnippet($snippet);
-        $video->setStatus($status);
+		// Set the Snippet & Status
+		$video = new \Google_Service_YouTube_Video();
+		if ($id)
+		{
+			$video->setId($id);
+		}
 
-        return $video;
-    }
+		$video->setSnippet($snippet);
+		$video->setStatus($status);
+		$video->setRecordingDetails($recordingDetails);
 
-    /**
-     * Check if a YouTube video exists by it's ID.
-     *
-     * @param  int  $id
-     *
-     * @return bool
-     */
-    public function exists($id)
-    {
-        $this->handleAccessToken();
+		return $video;
+	}
 
-        $response = $this->youtube->videos->listVideos('status', ['id' => $id]);
+	/**
+	 * Check if a YouTube video exists by it's ID.
+	 *
+	 * @param  int  $id
+	 *
+	 * @return bool
+	 */
+	public function exists($id)
+	{
+		$this->handleAccessToken();
 
-        if (empty($response->items)) return false;
+		$response = $this->youtube->videos->listVideos('status', ['id' => $id]);
 
-        return true;
-    }
+		if (empty($response->items)) return false;
 
-    /**
-     * Return the Video ID
-     *
-     * @return string
-     */
-    public function getVideoId()
-    {
-        return $this->videoId;
-    }
+		return true;
+	}
 
-    /**
-     * Return the snippet of the uploaded Video
-     *
-     * @return array
-     */
-    public function getSnippet()
-    {
-        return $this->snippet;
-    }
+	/**
+	 * Return the Video ID
+	 *
+	 * @return string
+	 */
+	public function getVideoId()
+	{
+		return $this->videoId;
+	}
 
-    /**
-     * Return the URL for the Custom Thumbnail
-     *
-     * @return string
-     */
-    public function getThumbnailUrl()
-    {
-        return $this->thumbnailUrl;
-    }
+	/**
+	 * Return the snippet of the uploaded Video
+	 *
+	 * @return array
+	 */
+	public function getSnippet()
+	{
+		return $this->snippet;
+	}
 
-    /**
-     * Setup the Google Client
-     *
-     * @param Google_Client $client
-     * @return Google_Client $client
-     * @throws Exception
-     */
-    private function setup(Google_Client $client)
-    {
-        if(
-            !$this->app->config->get('youtube.client_id') ||
-            !$this->app->config->get('youtube.client_secret')
-        ) {
-            throw new Exception('A Google "client_id" and "client_secret" must be configured.');
-        }
+	/**
+	 * Return the URL for the Custom Thumbnail
+	 *
+	 * @return string
+	 */
+	public function getThumbnailUrl()
+	{
+		return $this->thumbnailUrl;
+	}
 
-        $client->setClientId($this->app->config->get('youtube.client_id'));
-        $client->setClientSecret($this->app->config->get('youtube.client_secret'));
-        $client->setScopes($this->app->config->get('youtube.scopes'));
-        $client->setAccessType('offline');
-        $client->setApprovalPrompt('force');
-        $client->setRedirectUri(url(
-            $this->app->config->get('youtube.routes.prefix')
-            . '/' .
-            $this->app->config->get('youtube.routes.redirect_uri')
-        ));
+	/**
+	 * Setup the Google Client
+	 *
+	 * @param Google_Client $client
+	 * @return Google_Client $client
+	 * @throws Exception
+	 */
+	private function setup(Google_Client $client)
+	{
+		if(
+			!$this->app->config->get('youtube.client_id') ||
+			!$this->app->config->get('youtube.client_secret')
+		) {
+			throw new Exception('A Google "client_id" and "client_secret" must be configured.');
+		}
 
-        return $this->client = $client;
-    }
+		$client->setClientId($this->app->config->get('youtube.client_id'));
+		$client->setClientSecret($this->app->config->get('youtube.client_secret'));
+		$client->setScopes($this->app->config->get('youtube.scopes'));
+		$client->setAccessType('offline');
+		$client->setApprovalPrompt('force');
+		$client->setRedirectUri(url(
+			$this->app->config->get('youtube.routes.prefix')
+			. '/' .
+			$this->app->config->get('youtube.routes.redirect_uri')
+		));
 
-    /**
-     * Saves the access token to the database.
-     *
-     * @param  string  $accessToken
-     */
-    public function saveAccessTokenToDB($accessToken)
-    {
-        return DB::table('youtube_access_tokens')->insert([
-            'access_token' => json_encode($accessToken),
-            'created_at'   => (new \DateTime())->setTimestamp($accessToken['created']),
-        ]);
-    }
+		return $this->client = $client;
+	}
 
-    /**
-     * Get the latest access token from the database.
-     *
-     * @return string
-     */
-    public function getLatestAccessTokenFromDB()
-    {
-        $latest = DB::table('youtube_access_tokens')
-                    ->latest('created_at')
-                    ->first();
+	/**
+	 * Saves the access token to the database.
+	 *
+	 * @param  string  $accessToken
+	 */
+	public function saveAccessTokenToDB($accessToken)
+	{
+		return DB::table('youtube_access_tokens')->insert([
+			'access_token' => json_encode($accessToken),
+			'created_at'   => (new \DateTime())->setTimestamp($accessToken['created']),
+		]);
+	}
 
-        return $latest ? (is_array($latest) ? $latest['access_token'] : $latest->access_token ) : null;
-    }
+	/**
+	 * Get the latest access token from the database.
+	 *
+	 * @return string
+	 */
+	public function getLatestAccessTokenFromDB()
+	{
+		$latest = DB::table('youtube_access_tokens')
+			->latest('created_at')
+			->first();
 
-    /**
-     * Handle the Access Token
-     *
-     * @return void
-     */
-    public function handleAccessToken()
-    {
-        if (is_null($accessToken = $this->client->getAccessToken())) {
-            throw new \Exception('An access token is required.');
-        }
+		return $latest ? (is_array($latest) ? $latest['access_token'] : $latest->access_token ) : null;
+	}
 
-        if($this->client->isAccessTokenExpired())
-        {
-            // If we have a "refresh_token"
-            if (array_key_exists('refresh_token', $accessToken))
-            {
-                // Refresh the access token
-                $this->client->refreshToken($accessToken['refresh_token']);
+	/**
+	 * Handle the Access Token
+	 *
+	 * @return void
+	 */
+	public function handleAccessToken()
+	{
+		if (is_null($accessToken = $this->client->getAccessToken())) {
+			throw new \Exception('An access token is required.');
+		}
 
-                // Save the access token
-                $this->saveAccessTokenToDB($this->client->getAccessToken());
-            }
-        }
-    }
+		if($this->client->isAccessTokenExpired())
+		{
+			// If we have a "refresh_token"
+			if (array_key_exists('refresh_token', $accessToken))
+			{
+				// Refresh the access token
+				$this->client->refreshToken($accessToken['refresh_token']);
 
-    /**
-     * Pass method calls to the Google Client.
-     *
-     * @param  string  $method
-     * @param  array   $args
-     *
-     * @return mixed
-     */
-    public function __call($method, $args)
-    {
-        return call_user_func_array([$this->client, $method], $args);
-    }
+				// Save the access token
+				$this->saveAccessTokenToDB($this->client->getAccessToken());
+			}
+		}
+	}
+
+	/**
+	 * Pass method calls to the Google Client.
+	 *
+	 * @param  string  $method
+	 * @param  array   $args
+	 *
+	 * @return mixed
+	 */
+	public function __call($method, $args)
+	{
+		return call_user_func_array([$this->client, $method], $args);
+	}
 }
