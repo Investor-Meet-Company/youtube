@@ -38,5 +38,10 @@
                 "Youtube": "Dawson\\Youtube\\Facades\\Youtube"
             }
         }
+    },
+    "config": {
+        "allow-plugins": {
+            "kylekatarnls/update-helper": false
+        }
     }
 }
