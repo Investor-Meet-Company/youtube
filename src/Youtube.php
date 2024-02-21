@@ -280,6 +280,7 @@ class Youtube
 		$status = new \Google_Service_YouTube_VideoStatus();
 		$status->privacyStatus = $privacyStatus;
 		$status->selfDeclaredMadeForKids = false;
+        $status->embeddable = true;
 
 		$recordingDetails = new \Google_Service_YouTube_VideoRecordingDetails();
 		if (array_key_exists('recording_date', $data)) $recordingDetails->setRecordingDate($data['recording_date']);
